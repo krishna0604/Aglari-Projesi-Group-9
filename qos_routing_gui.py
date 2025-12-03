@@ -128,6 +128,287 @@ def find_best_path_simple(G, source, target, w_delay, w_rel, w_res):
         return None
 
 
+def q_learning_shortest_path(
+    G,
+    source,
+    target,
+    w_delay,
+    w_rel,
+    w_res,
+    episodes: int = 200,
+    max_steps: int = 200,
+    alpha: float = 0.6,
+    gamma: float = 0.9,
+    epsilon_start: float = 1.0,
+    epsilon_end: float = 0.05,
+):
+    """
+    Basit Q-Learning tabanlı yol bulma.
+
+    - Durumlar: Düğümler
+    - Aksiyonlar: Komşu düğümler
+    - Ödül: Seçilen kenarın ağırlığına dayalı negatif maliyet
+            (toplam maliyeti minimize etmek için)
+
+    Not: Bu, eğitim amaçlı basit bir sürümdür; büyük ağlarda /
+    çok sayıda bölümde çalıştırmak maliyetli olabilir.
+    """
+
+    if source == target:
+        return [source]
+
+    # Q-tablosu: (state, action) -> Q değeri
+    Q = {}
+
+    def edge_cost(u, v):
+        data = G.edges[u, v]
+        link_delay = data["link_delay"]
+        proc_delay = G.nodes[v]["processing_delay"]
+
+        node_rel_u = G.nodes[u]["node_reliability"]
+        node_rel_v = G.nodes[v]["node_reliability"]
+        link_rel = data["link_reliability"]
+        edge_rel_cost = -math.log(link_rel) - math.log(node_rel_u) - math.log(node_rel_v)
+
+        bandwidth = data["bandwidth"]
+        res_cost = 1000.0 / bandwidth
+
+        total_delay_edge = link_delay + proc_delay
+
+        return compute_total_cost(
+            total_delay_edge,
+            edge_rel_cost,
+            res_cost,
+            w_delay,
+            w_rel,
+            w_res,
+        )
+
+    nodes = list(G.nodes())
+
+    def get_Q(s, a):
+        return Q.get((s, a), 0.0)
+
+    def set_Q(s, a, value):
+        Q[(s, a)] = value
+
+    def epsilon_greedy(state, epsilon):
+        neighbors = list(G.neighbors(state))
+        if not neighbors:
+            return None
+
+        # Rastgele seçim (keşif)
+        if random.random() < epsilon:
+            return random.choice(neighbors)
+
+        # En iyi aksiyonu seç (sömürü)
+        best_a = None
+        best_q = None
+        for a in neighbors:
+            q_val = get_Q(state, a)
+            if best_q is None or q_val > best_q:
+                best_q = q_val
+                best_a = a
+        return best_a
+
+    def max_Q(state):
+        neighbors = list(G.neighbors(state))
+        if not neighbors:
+            return 0.0
+        return max(get_Q(state, a) for a in neighbors)
+
+    # Lineer epsilon azalması
+    def epsilon_for_episode(ep):
+        if episodes <= 1:
+            return epsilon_end
+        t = ep / (episodes - 1)
+        return epsilon_start * (1 - t) + epsilon_end * t
+
+    best_path = None
+    best_total_reward = None
+
+    for ep in range(episodes):
+        state = source
+        visited = {state}
+        path = [state]
+        total_reward = 0.0
+        epsilon = epsilon_for_episode(ep)
+
+        for _ in range(max_steps):
+            if state == target:
+                break
+
+            action = epsilon_greedy(state, epsilon)
+            if action is None:
+                break
+
+            # Aynı düğüm etrafında dönmeyi azaltmak için
+            # zaten ziyaret edilmiş bir düğüme tekrar gitmeyi
+            # biraz cezalandırıyoruz.
+            step_cost = edge_cost(state, action)
+            reward = -step_cost
+            if action in visited:
+                reward -= 0.1 * abs(reward)
+
+            next_state = action
+
+            old_q = get_Q(state, action)
+            target_q = reward + gamma * max_Q(next_state)
+            new_q = (1 - alpha) * old_q + alpha * target_q
+            set_Q(state, action, new_q)
+
+            total_reward += reward
+            state = next_state
+            path.append(state)
+            visited.add(state)
+
+            if state == target:
+                break
+
+        if state == target:
+            if best_total_reward is None or total_reward > best_total_reward:
+                best_total_reward = total_reward
+                best_path = path
+
+    return best_path
+
+
+def sarsa_shortest_path(
+    G,
+    source,
+    target,
+    w_delay,
+    w_rel,
+    w_res,
+    episodes: int = 200,
+    max_steps: int = 200,
+    alpha: float = 0.6,
+    gamma: float = 0.9,
+    epsilon_start: float = 1.0,
+    epsilon_end: float = 0.05,
+):
+    """
+    SARSA (on-policy) tabanlı basit yol bulma.
+
+    Q-Learning'e benzer, fakat güncellemede bir sonraki
+    durumdaki *seçilen* aksiyonun Q değeri kullanılır.
+    """
+
+    if source == target:
+        return [source]
+
+    Q = {}
+
+    def edge_cost(u, v):
+        data = G.edges[u, v]
+        link_delay = data["link_delay"]
+        proc_delay = G.nodes[v]["processing_delay"]
+
+        node_rel_u = G.nodes[u]["node_reliability"]
+        node_rel_v = G.nodes[v]["node_reliability"]
+        link_rel = data["link_reliability"]
+        edge_rel_cost = -math.log(link_rel) - math.log(node_rel_u) - math.log(node_rel_v)
+
+        bandwidth = data["bandwidth"]
+        res_cost = 1000.0 / bandwidth
+
+        total_delay_edge = link_delay + proc_delay
+
+        return compute_total_cost(
+            total_delay_edge,
+            edge_rel_cost,
+            res_cost,
+            w_delay,
+            w_rel,
+            w_res,
+        )
+
+    def get_Q(s, a):
+        return Q.get((s, a), 0.0)
+
+    def set_Q(s, a, value):
+        Q[(s, a)] = value
+
+    def epsilon_greedy(state, epsilon):
+        neighbors = list(G.neighbors(state))
+        if not neighbors:
+            return None
+
+        if random.random() < epsilon:
+            return random.choice(neighbors)
+
+        best_a = None
+        best_q = None
+        for a in neighbors:
+            q_val = get_Q(state, a)
+            if best_q is None or q_val > best_q:
+                best_q = q_val
+                best_a = a
+        return best_a
+
+    def epsilon_for_episode(ep):
+        if episodes <= 1:
+            return epsilon_end
+        t = ep / (episodes - 1)
+        return epsilon_start * (1 - t) + epsilon_end * t
+
+    best_path = None
+    best_total_reward = None
+
+    for ep in range(episodes):
+        state = source
+        epsilon = epsilon_for_episode(ep)
+        action = epsilon_greedy(state, epsilon)
+        if action is None:
+            continue
+
+        visited = {state}
+        path = [state]
+        total_reward = 0.0
+
+        for _ in range(max_steps):
+            if action is None:
+                break
+
+            # Çevrimleri azaltmak için tekrar ziyaret cezası
+            step_cost = edge_cost(state, action)
+            reward = -step_cost
+            if action in visited:
+                reward -= 0.1 * abs(reward)
+
+            next_state = action
+
+            if next_state == target:
+                next_action = None
+            else:
+                next_action = epsilon_greedy(next_state, epsilon)
+
+            old_q = get_Q(state, action)
+            if next_action is None:
+                target_q = reward
+            else:
+                target_q = reward + gamma * get_Q(next_state, next_action)
+
+            new_q = (1 - alpha) * old_q + alpha * target_q
+            set_Q(state, action, new_q)
+
+            total_reward += reward
+            state = next_state
+            path.append(state)
+            visited.add(state)
+            action = next_action
+
+            if state == target:
+                break
+
+        if state == target:
+            if best_total_reward is None or total_reward > best_total_reward:
+                best_total_reward = total_reward
+                best_path = path
+
+    return best_path
+
+
 # ======================================================
 # 3) GUI Uygulaması
 # ======================================================
@@ -372,6 +653,7 @@ class QoSRoutingApp(tk.Tk):
             "Genetik Algoritma (Grup 1)",
             "Karınca Kolonisi (Grup 1)",
             "Q-Learning (Grup 2)",
+            "SARSA (Grup 2)",
         ]
         self.alg_var = tk.StringVar(value=self.algorithms[0])
 
@@ -807,15 +1089,77 @@ class QoSRoutingApp(tk.Tk):
 
     def run_q_learning(self, G, s, d, w_delay, w_rel, w_res):
         """
-        TODO (Grup 2):
-        Buraya Q-Learning (Pekiştirmeli Öğrenme) ile yol bulma kodu gelecek.
+        Q-Learning tabanlı, basit bir en iyi yol arama.
+
+        Notlar:
+        - Eğitim parametreleri makul tutulmuştur (bölüm sayısı vb.).
+        - Ağ oldukça büyük olduğundan, çok yüksek bölüm sayıları
+          hesaplama süresini ciddi şekilde artırabilir.
         """
-        messagebox.showinfo(
-            "Bilgi",
-            "Q-Learning (RL) algoritması henüz eklenmedi.\n"
-            "Bu kısım Grup 2 tarafından doldurulacak.",
+        self._write_results(
+            "Q-Learning eğitimi başlatılıyor...\n"
+            "Bu işlem birkaç saniye sürebilir, lütfen bekleyin.\n"
         )
-        return None
+        self.update_idletasks()
+
+        path = q_learning_shortest_path(
+            G,
+            source=s,
+            target=d,
+            w_delay=w_delay,
+            w_rel=w_rel,
+            w_res=w_res,
+            episodes=200,
+            max_steps=200,
+            alpha=0.6,
+            gamma=0.9,
+            epsilon_start=1.0,
+            epsilon_end=0.05,
+        )
+
+        if path is None:
+            messagebox.showinfo(
+                "Bilgi",
+                "Q-Learning, hedefe ulaşan geçerli bir yol bulamadı.\n"
+                "Lütfen farklı bir S/D çifti veya ağırlık kombinasyonu deneyin.",
+            )
+
+        return path
+
+    def run_sarsa(self, G, s, d, w_delay, w_rel, w_res):
+        """
+        SARSA (on-policy) tabanlı yol arama.
+        Q-Learning'e benzer ancak güncelleme kuralı on-policy'dir.
+        """
+        self._write_results(
+            "SARSA eğitimi başlatılıyor...\n"
+            "Bu işlem birkaç saniye sürebilir, lütfen bekleyin.\n"
+        )
+        self.update_idletasks()
+
+        path = sarsa_shortest_path(
+            G,
+            source=s,
+            target=d,
+            w_delay=w_delay,
+            w_rel=w_rel,
+            w_res=w_res,
+            episodes=200,
+            max_steps=200,
+            alpha=0.6,
+            gamma=0.9,
+            epsilon_start=1.0,
+            epsilon_end=0.05,
+        )
+
+        if path is None:
+            messagebox.showinfo(
+                "Bilgi",
+                "SARSA, hedefe ulaşan geçerli bir yol bulamadı.\n"
+                "Lütfen farklı bir S/D çifti veya ağırlık kombinasyonu deneyin.",
+            )
+
+        return path
 
     # ---------------- HESAPLA Butonu ----------------
 
@@ -860,6 +1204,8 @@ class QoSRoutingApp(tk.Tk):
             path = self.run_ant_colony(self.G, s, d, w_delay, w_rel, w_res)
         elif alg.startswith("Q-Learning"):
             path = self.run_q_learning(self.G, s, d, w_delay, w_rel, w_res)
+        elif alg.startswith("SARSA"):
+            path = self.run_sarsa(self.G, s, d, w_delay, w_rel, w_res)
         else:
             messagebox.showwarning("Uyarı", "Bilinmeyen algoritma seçimi.")
             return
