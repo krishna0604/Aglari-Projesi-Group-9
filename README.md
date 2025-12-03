@@ -69,9 +69,7 @@ Algoritma Bazında Başarısızlık Sayıları:
    Talep Edilen Bant Genişliği: 468.02 Mbps
    Gerekçe: Bant genişliği yetersiz: minimum=345.14 Mbps, talep=468.02 Mbps (darboğaz kenar: (10, 44))
 
-================================================================================
-ALGORİTMA KARŞILAŞTIRMASI - İSTATİSTİKSEL ANALİZ
-================================================================================
+#ALGORİTMA KARŞILAŞTIRMASI - İSTATİSTİKSEL ANALİZ
 
 --------------------------------------------------------------------------------
 Toplam Maliyet
